@@ -1,0 +1,5 @@
+#!/usr/bin/env ruby
+
+require 'hdeploy'
+puts HDeploy::where_is(ARGV.first)
+

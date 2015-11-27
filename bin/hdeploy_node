@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+
+require 'hdeploy'
+
+node = HDeploy::Node.new
+
+
+if ARGV.length == 0
+  node.run
+else
+  if ARGV.first == 'symlink'
+    # we need special syntax: symlink app env
+    params = {}
+    STDIN.read.split(' ').each do |param|
+      k,v = param.split(':')
+      params[k] = v
+    end
+
+    node.symlink(params)
+
+  elsif %w(symlink post_distribute_run_once post_symlink_run_once).include? ARGV.first
+
+    # Decode the next ARGV stuff. This encoding k:v is the simplest I found.
+    params = {}
+    STDIN.read.split(' ').each do |param|
+      k,v = param.split(':')
+      params[k] = v
+    end
+
+    node.run_hook(ARGV[0],params)
+  else
+    node.send(ARGV.first)
+  end
+end

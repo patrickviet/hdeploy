@@ -1,0 +1,7 @@
+create table distribute_state (app text, env text, hostname text, current text, artifacts text, primary key(app,env,hostname));
+create table srv_keepalive (hostname text, primary key (hostname));
+create table distribute (artifact text, app text, env text, primary key(artifact,app,env));
+create table artifacts (artifact text, app text, source text, altsource text, checksum text, primary key (artifact,app));
+create table target (app text, env text, artifact text, primary key (app,env));
+create table active_env (app text, env text, primary key (app,env));
+

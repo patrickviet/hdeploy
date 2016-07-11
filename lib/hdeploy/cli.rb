@@ -10,6 +10,7 @@ module HDeploy
     def initialize
       @config = HDeploy::Config.instance
       @client = HDeploy::APIClient.instance
+      @domain_name = @config.conf['cli']['domain_name']
       @app = @config.conf['cli']['default_app']
       @env = @config.conf['cli']['default_env']
       @force = false
@@ -458,11 +459,11 @@ module HDeploy
         h = JSON.parse(@client.get("/srv/by_app/#{@app}/#{@env}"))
 
         # On all servers, do a standard check deploy.
-        system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.join(',')} -P host_monkeypatch:gyg.io -- sudo hdeploy_node check_deploy")
+        system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.join(',')} -P host_monkeypatch:#{@domain_name} -- sudo hdeploy_node check_deploy")
 
         # And on a single server, run the single hook.
         hookparams = { app: @app, env: @env, artifact: build_tag, servers:h.keys.join(','), user: ENV['USER'] }.collect {|k,v| "#{k}:#{v}" }.join(" ")
-        system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.sample} -P host_monkeypatch:gyg.io -- 'echo #{hookparams} | sudo hdeploy_node post_distribute_run_once'")
+        system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.sample} -P host_monkeypatch:#{@domain_name} -- 'echo #{hookparams} | sudo hdeploy_node post_distribute_run_once'")
       end
     end
 
@@ -490,11 +491,11 @@ module HDeploy
       end
 
       # On all servers, do a standard symlink
-      system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.join(',')} -P host_monkeypatch:gyg.io -- 'echo app:#{@app} env:#{@env} | sudo hdeploy_node symlink'")
+      system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.join(',')} -P host_monkeypatch:#{@domain_name} -- 'echo app:#{@app} env:#{@env} | sudo hdeploy_node symlink'")
 
       # And on a single server, run the single hook.
       hookparams = { app: @app, env: @env, artifact: target, servers:h.keys.join(','), user: ENV['USER'] }.collect {|k,v| "#{k}:#{v}" }.join(" ")
-      system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.sample} -P host_monkeypatch:gyg.io -- 'echo #{hookparams} | sudo hdeploy_node post_symlink_run_once'")
+      system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.sample} -P host_monkeypatch:#{@domain_name} -- 'echo #{hookparams} | sudo hdeploy_node post_symlink_run_once'")
     end
   end
 end

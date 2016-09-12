@@ -1,7 +1,7 @@
 require 'sinatra/base'
 require 'json'
 require 'hdeploy/config'
-require 'cassandra'
+require 'hdeploy/cassandra'
 
 module HDeploy
   class API < Sinatra::Base
@@ -9,12 +9,7 @@ module HDeploy
     def initialize
       super
 
-      reconnect_interval = 2
-
-      @cassandra_cluster = Cassandra.cluster(
-        reconnection_policy: Cassandra::Reconnection::Policies::Constant.new(reconnect_interval),
-      )
-      @cass = @cassandra_cluster.connect('hdeploy')
+      @cass = HDeploy::Cassandra.new
       @config = HDeploy::Config.instance
     end
 

@@ -8,7 +8,7 @@ module HDeploy
   class CLI
 
     def initialize
-      @config = HDeploy::Config.instance
+      @config = HDeploy::Config.instance('build')
       @client = HDeploy::APIClient.instance
       @domain_name = @config.conf['cli']['domain_name']
       @app = @config.conf['cli']['default_app']
@@ -114,7 +114,7 @@ module HDeploy
     end
 
     def prune_build_env
-      c = @config.conf["build:#{@app}"]
+      c = @config.conf[@app]
       keepnum = c['prune_build_env'] || 2
       keepnum = keepnum.to_i
 

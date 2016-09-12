@@ -3,41 +3,50 @@ require 'singleton'
 
 module HDeploy
   class Config
-
-    attr_accessor :cfile
-    attr_accessor :conf
-
     include Singleton
 
+    def initialize(path = '/opt/hdeploy/etc')
+
     # -------------------------------------------------------------------------
-    def initialize
-      # FIXME: add options to try manually set places...
-      cfile_try = [
-        'hdeploy.ini',
-        '/opt/hdeploy/hdeploy.ini',
-        '/etc/hdeploy/hdeploy.ini',
-        '/etc/hdeploy.ini',
-      ]
-      cfile_try.insert(1,File.expand_path('~/hdeploy.ini')) if ENV.has_key?'HOME'
+    def load_file(conf_type)
+    
+      # conf_type should be one of these:
+      # build, api, node
+      # the config file should NOT be writable by any other user than chef - and it will also deny symlinks
+      # for general security
 
+      cfile = File.join(@path, "hdeploy_#{conf_type}.ini")
+      raise "unable to find conf file #{cfile}" unless File.exists? cfile
+      
+      st = File.stat(cfile)
+      raise "config file #{cfile} must not be a symlink" if File.symlink?(cfile)
+      raise "config file #{cfile} must be a regular file" unless st.file?
+      raise "config file #{cfile} must have uid 0" unless st.uid == 0
+      raise "config file #{cfile} must not allow group/others to write" unless sprintf("%o", st.mode) =~ /^100[46][04][04]/
+      
+      # Seems we have checked everything. Woohoo!
+      @cfile[conf_type] = cfile
+      
+    end
 
-      cfile = false
-      cfile_try.each do |f|
-        if File.exists? f
-          cfile = f
-          break
+    # -------------------------------------------------------------------------
+    def reload(conf_type = nil)
+      if conf_type
+        conf[conf_type] = IniFile.load(@cfile[conf_type]).to_h
+      else
+        # load all
+        @cfile.each do |t,f|
+          conf[t] = IniFile.load(@cfile).to_h
         end
       end
-      raise "unable to find conf file (tried #{cfile_try.join(',')})" unless cfile
 
-      @cfile = cfile
-      reload
+
+
+
+      @conf[t] = IniFile.load(@cfile).to_h
     end
 
-    # -------------------------------------------------------------------------
-    def reload
-      @conf = IniFile.load(@cfile).to_h
-    end
+    def method_missing
 
   end
 end

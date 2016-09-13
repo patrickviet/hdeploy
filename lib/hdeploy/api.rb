@@ -10,7 +10,7 @@ module HDeploy
       super
 
       @cass = HDeploy::Cassandra.new
-      @config = HDeploy::Config.instance
+      @conf = HDeploy::Conf.instance
     end
 
     # -----------------------------------------------------------------------------
@@ -23,7 +23,7 @@ module HDeploy
 
     def authorized?
       @auth ||=  Rack::Auth::Basic::Request.new(request.env)
-      @auth.provided? and @auth.basic? and @auth.credentials and @auth.credentials == @config.conf['api'].values_at('http_user','http_password')
+      @auth.provided? and @auth.basic? and @auth.credentials and @auth.credentials == @conf.api.values_at('http_user','http_password')
     end
 
     get '/health' do

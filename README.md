@@ -84,3 +84,46 @@ If something didn't fully roll out for whatever reason (say, network failure) yo
 
 
 
+Configuration documentation
+---------------------------
+
+```json
+{
+  "api": {
+    "http_user": "someuser",
+    "http_password": "somepassword",
+    "endpoint": "http://somefqdn:port/"
+  },
+  "node": {
+    "keepalive_delay": 60,
+    "check_deploy_delay": 60
+  },
+  "build": {
+    "nameofapp": {
+      "git": "git@github.com:organization/repo",
+      "subdir": "",
+      "prune": 5,
+      "repo_dir": "~/build/repos/nameofapp",
+
+      "build_dir": "~/build/build/nameofapp",
+      "artifacts_dir": "/home/artifacts"
+
+    }
+  },
+  "deploy": {
+    "nameofapp": {
+      "relpath": "/var/www/nameofapp/releases",
+      "tgzpath": "/var/www/nameofapp/tarballs",
+      "symlink": "/var/www/nameofapp/current",
+      "user": "appuser",
+      "group": "appgroup"
+    }
+  },
+  "cli": {
+    "fab": "/opt/hdeploy/embedded/bin/fab",
+    "default_app":"nameofapp",
+    "domain_name":"mydomain.com"
+  }
+}
+
+```

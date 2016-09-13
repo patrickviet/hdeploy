@@ -1,4 +1,4 @@
-require 'hdeploy/config'
+require 'hdeploy/conf'
 require 'hdeploy/cli'
 require 'hdeploy/node'
 require 'hdeploy/apiclient'

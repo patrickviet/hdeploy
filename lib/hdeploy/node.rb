@@ -8,7 +8,7 @@ module HDeploy
   class Node
 
     def initialize
-      @config = HDeploy::Config.instance
+      @conf = HDeploy::Conf.instance
     end
 
     # -------------------------------------------------------------------------
@@ -17,9 +17,9 @@ module HDeploy
       require 'eventmachine'
 
       EM.run do
-        repeat_action('/usr/local/bin/hdeploy_node keepalive',   @config.conf['node']['keepalive_delay'].to_i,0)
-        repeat_action('/usr/local/bin/hdeploy_node check_deploy',@config.conf['node']['check_deploy_delay'].to_i,100)
-        EM.add_timer(@config.conf['node']['max_run_duration'].to_i) do
+        repeat_action("#{@home}/bin/hdeploy_node keepalive",   @conf.node['keepalive_delay'].to_i,0)
+        repeat_action("#{@home}/bin/hdeploy_node check_deploy",@conf.node['check_deploy_delay'].to_i,100)
+        EM.add_timer(@conf.node['max_run_duration'].to_i) do
           puts "has run long enough"
           EM.stop
         end
@@ -36,28 +36,27 @@ module HDeploy
 
     # -------------------------------------------------------------------------
     def keepalive
-      hostname = @config.conf['node']['hostname']
-      c = Curl::Easy.new(@config.conf['global']['endpoint'] + '/srv/keepalive/' + hostname)
+      hostname = @conf.node['hostname']
+      c = Curl::Easy.new(@conf['api']['endpoint'] + '/srv/keepalive/' + hostname)
       c.http_auth_types = :basic
-      c.username = @config.conf['api']['http_user']
-      c.password = @config.conf['api']['http_password']
-      c.put((@config.conf['node']['keepalive_delay'].to_i * 2).to_s)
+      c.username = @conf['api']['http_user']
+      c.password = @conf['api']['http_password']
+      c.put((@conf.node['keepalive_delay'].to_i * 2).to_s)
     end
 
     def put_state
-      hostname = @config.conf['node']['hostname']
+      hostname = @conf.node['hostname']
 
-      c = Curl::Easy.new(@config.conf['global']['endpoint'] + '/distribute_state/' + hostname)
+      c = Curl::Easy.new(@conf['api']['endpoint'] + '/distribute_state/' + hostname)
       c.http_auth_types = :basic
-      c.username = @config.conf['api']['http_user']
-      c.password = @config.conf['api']['http_password']
+      c.username = @conf['api']['http_user']
+      c.password = @conf['api']['http_password']
 
       r = []
 
       # Will look at directories and figure out current state
-      @config.conf.each do |section,conf|
-        next unless section =~ /^deploy\:(.*)\:(.*)/
-        app,env = $1,$2
+      @conf['deploy'].each do |section,conf|
+        app,env = section.split(':')
 
         relpath,tgzpath,symlink = conf.values_at('relpath','tgzpath','symlink')
 
@@ -83,25 +82,44 @@ module HDeploy
       c.put(JSON.generate(r))
     end
 
+    def find_executable(name)
+      %w[
+        /opt/hdeploy/embedded/bin
+        /opt/hdeploy/bin
+        /usr/local/bin
+        /usr/bin
+      ].each do |p|
+        e = File.join p,name
+        next unless File.exists? e
+        st = File.stat(e)
+        next unless st.uid == 0
+        next unless st.gid == 0
+        if sprintf("%o", st.mode) == '100755'
+          return e
+        else
+          warn "file #{file} does not have permissions 100755"
+        end
+      end
+    end
+
     def check_deploy
       put_state
 
       c = Curl::Easy.new()
       c.http_auth_types = :basic
-      c.username = @config.conf['api']['http_user']
-      c.password = @config.conf['api']['http_password']
+      c.username = @conf['api']['http_user']
+      c.password = @conf['api']['http_password']
 
       # Now this is the big stuff
-      @config.conf.each do |section,conf|
-        next unless section =~ /^deploy\:(.*)\:(.*)/
-        app,env = $1,$2
+      @conf['deploy'].each do |section,conf|
+        app,env = section.split(':')
 
         # Here we get the info.
         # FIXME: double check that config is ok
         relpath,tgzpath,symlink,user,group = conf.values_at('relpath','tgzpath','symlink','user','group')
 
         # Now the release info from the server
-        c.url = @config.conf['global']['endpoint'] + '/distribute/' + app + '/' + env
+        c.url = @conf['api']['endpoint'] + '/distribute/' + app + '/' + env
         c.perform
 
         # prepare directories
@@ -117,25 +135,27 @@ module HDeploy
         artifacts.each do |artifact,artdata|
           puts "checking artifact #{artifact}"
           destdir   = File.join relpath,artifact
-          tgzfile   = File.join tgzpath,artifact+'.tar.gz'
+          tgzfile   = File.join tgzpath,(artifact+'.tar.gz')
           readyfile = File.join destdir,'READY'
 
           if !(File.exists?readyfile)
             # we have to release. let's cleanup.
-            FileUtils.rm_rf(destdir) if File.exists?destdir
+            FileUtils.rm_rf(destdir) if File.exists?(destdir)
             count = 0
             while count < 5 and !(File.exists?tgzfile and Digest::MD5.file(tgzfile) == artdata['checksum'])
               count += 1
               File.unlink tgzfile if File.exists?tgzfile
               # FIXME: add altsource and BREAK
-              if File.exists?('/usr/local/bin/aria2c') or File.exists?('/usr/bin/aria2c')
-                system("aria2c -x 5 -d #{tgzpath} -o #{artifact}.tar.gz #{artdata['source']}")
+              # FIXME: don't run download as root!!
+              #####
+              if f = find_executable('aria2')
+                system("#{f} -x 5 -d #{tgzpath} -o #{artifact}.tar.gz #{artdata['source']}")
 
-              elsif File.exists?('/usr/bin/wget') or File.exists?('/usr/local/bin/wget')
-                system("wget -o #{tgzfile} #{artdata['source']}")
+              elsif f = find_executable('wget')
+                system("#{f} -o #{tgzfile} #{artdata['source']}")
 
-              elsif File.exists?('/usr/bin/curl') or File.exists?('/usr/local/bin/curl')
-                system("curl -o #{tgzfile} #{artdata['source']}")                
+              elsif f = find_executable('curl')
+                system("#{f} -o #{tgzfile} #{artdata['source']}")                
 
               else
                 raise "no aria2c, wget or curl available. please install one of them."
@@ -149,12 +169,14 @@ module HDeploy
             FileUtils.mkdir_p destdir
             FileUtils.chown user, group, destdir
             Dir.chdir destdir
-            system("chpst -u #{user}:#{group} tar xzf #{tgzfile}") or raise "unable to extract #{tgzfile} as #{user}:#{group}"
+            chpst = find_executable('chpst')
+            tar = find_executable('tar')
+            system("#{chpst} -u #{user}:#{group} #{tar} xzf #{tgzfile}") or raise "unable to extract #{tgzfile} as #{user}:#{group}"
             File.chmod 0755, destdir
 
             # Post distribute hook
             run_hook('post_distribute', {'app' => app, 'env' => env, 'artifact' => artifact})
-            FileUtils.touch(File.join(destdir,'READY'))
+            FileUtils.touch(File.join(destdir,'READY')) #FIXME: root?
           end
 
           # we only get here if previous step worked.
@@ -192,9 +214,9 @@ module HDeploy
 
       oldpwd = Dir.pwd
 
-      raise "no such app/env #{app} / #{env}" unless @config.conf.has_key? "deploy:#{app}:#{env}"
+      raise "no such app/env #{app} / #{env}" unless @conf['deploy'].has_key? "#{app}:#{env}"
 
-      relpath,user,group = @config.conf["deploy:#{app}:#{env}"].values_at('relpath','user','group')
+      relpath,user,group = @conf['deploy']["#{app}:#{env}"].values_at('relpath','user','group')
       destdir = File.join relpath,artifact
 
       # It's OK if the file doesn't exist
@@ -231,18 +253,18 @@ module HDeploy
         force = params['force']
       end
 
-      raise "no such app/env #{app} / #{env}" unless @config.conf.has_key? "deploy:#{app}:#{env}"
+      raise "no such app/env #{app} / #{env}" unless @conf['deploy'].has_key? "#{app}:#{env}"
 
-      conf = @config.conf["deploy:#{app}:#{env}"]
+      conf = @conf['deploy']["#{app}:#{env}"]
       link,relpath = conf.values_at('symlink','relpath')
 
       if force or !(File.exists?link)
         FileUtils.rm_rf(link) unless File.symlink?link
 
-        c = Curl::Easy.new(@config.conf['global']['endpoint'] + '/target/' + app + '/' + env)
+        c = Curl::Easy.new(@conf['api']['endpoint'] + '/target/' + app + '/' + env)
         c.http_auth_types = :basic
-        c.username = @config.conf['api']['http_user']
-        c.password = @config.conf['api']['http_password']
+        c.username = @conf['api']['http_user']
+        c.password = @conf['api']['http_password']
         c.perform
 
         target = c.body_str

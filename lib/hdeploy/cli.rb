@@ -8,19 +8,19 @@ module HDeploy
   class CLI
 
     def initialize
-      @config = HDeploy::Config.instance('build')
+      @config = HDeploy::Conf.instance
       @client = HDeploy::APIClient.instance
-      @domain_name = @config.conf['cli']['domain_name']
-      @app = @config.conf['cli']['default_app']
-      @env = @config.conf['cli']['default_env']
+      @domain_name = @conf['cli']['domain_name']
+      @app = @conf['cli']['default_app']
+      @env = @conf['cli']['default_env']
       @force = false
       @fakebuild = false
 
 
-      @config.conf.each do |k|
+      @conf.each do |k|
         next unless k[0..3] == 'app:'
-        @config.conf[k].each do |k2,v|
-          @config.conf[k][k2] = File.expand_path(v) if k2 =~ /\_path$/
+        @conf[k].each do |k2,v|
+          @conf[k][k2] = File.expand_path(v) if k2 =~ /\_path$/
         end
       end
     end
@@ -30,6 +30,10 @@ module HDeploy
         cmds = []
         ARGV.each do |arg|
           cmd = arg.split(':',2)
+          if cmd[0][0] == '_'
+            raise "you cant use cmd starting with a _"
+          end
+
           unless respond_to?(cmd[0])
             raise "no such command '#{cmd[0]}' in #{self.class} (#{__FILE__})"
           end
@@ -40,7 +44,7 @@ module HDeploy
           m = method(cmd[0]).parameters
 
           # only zero or one param
-          raise "method #{cmd[0]} takes several parameters. This is a progamming mistake. Ask Patrick to edit #{__FILE__}" if m.length > 1
+          raise "method #{cmd[0]} takes several parameters. This is a programming mistake. Ask Patrick to edit #{__FILE__}" if m.length > 1
 
           if m.length == 1
             if cmd.length > 1
@@ -71,6 +75,23 @@ module HDeploy
       raise "error running #{cmd} #{$?}" unless $?.success?
     end
 
+    def fab # looking for python 'fabric'
+      return @conf['cli']['fab'] if @conf['cli']['fab']
+
+      try_files = %w[
+        /usr/local/bin/fab
+        /usr/bin/fab
+        /opt/hdeploy/embedded/bin/fab
+        /opt/hdeploy/bin/fab
+      ]
+
+      try_files.each do |f|
+        return f if File.executable?(f)
+      end
+
+      raise "could not find fabric. tried #{try_files.join(' ')}"
+    end
+
     # -------------------------------------------------------------------------
     def app(newapp)
       @app = newapp
@@ -82,7 +103,7 @@ module HDeploy
     end
 
     def prune_artifacts
-      c = @config.conf["build:#{@app}"]
+      c = @conf['build'][@app]
       keepnum = c['prune'] || 5
       keepnum = keepnum.to_i
 
@@ -114,12 +135,12 @@ module HDeploy
     end
 
     def prune_build_env
-      c = @config.conf[@app]
+      c = @conf[@app]
       keepnum = c['prune_build_env'] || 2
       keepnum = keepnum.to_i
 
-      raise "incorrect dir config" unless c['build']
-      builddir = File.expand_path(c['build'])
+      raise "incorrect dir config" unless c['build_dir']
+      builddir = File.expand_path(c['build_dir'])
       return unless Dir.exists?(builddir)
       dirs = Dir.entries(builddir).delete_if{|d| d == '.' or d == '..' }.sort
       puts "build env pruning: keeping maximum #{keepnum} builds"
@@ -133,7 +154,7 @@ module HDeploy
 
     def prune(prune_env='nowhere')
 
-      c = @config.conf["build:#{@app}"]
+      c = @conf['build'][@app]
       prune_count = c['prune'].to_i #FIXME: integrity check.
       raise "no proper prune count" unless prune_count >= 3 and prune_count < 20
 
@@ -317,7 +338,7 @@ module HDeploy
     end
 
     def init
-      c = @config.conf["build:#{@app}"]
+      c = @conf['build'][@app]
       repo = File.expand_path(c['repo'])
 
       if !(Dir.exists?(File.join(repo,'.git')))
@@ -341,11 +362,11 @@ module HDeploy
       start_time = Time.new
 
       # Copy GIT directory
-      c = @config.conf["build:#{@app}"]
+      c = @conf['build'][@app]
       repo = File.expand_path(c['repo'])
 
       raise "Error in source dir #{repo}. Please run hdeploy initrepo" unless Dir.exists? (File.join(repo, '.git'))
-      directory = File.expand_path(File.join(c['build'], (@app + start_time.strftime('.%Y%m%d_%H_%M_%S.'))) + ENV['USER'] + (@fakebuild? '.fakebuild' : ''))
+      directory = File.expand_path(File.join(c['build_dir'], (@app + start_time.strftime('.%Y%m%d_%H_%M_%S.'))) + ENV['USER'] + (@fakebuild? '.fakebuild' : ''))
       FileUtils.mkdir_p directory
 
       # Update GIT directory
@@ -439,7 +460,7 @@ module HDeploy
     def register_tarball(build_tag)
       # Register tarball
       filename = build_tag + '.tar.gz'
-      checksum = Digest::MD5.file(File.join(@config.conf["build:#{@app}"]['artifacts'], filename))
+      checksum = Digest::MD5.file(File.join(@conf['build'][@app]['artifacts'], filename))
 
       @client.put("/artifact/#{@app}/#{build_tag}", JSON.pretty_generate({
         source: "http://build.gyg.io:8502/#{filename}",
@@ -459,11 +480,11 @@ module HDeploy
         h = JSON.parse(@client.get("/srv/by_app/#{@app}/#{@env}"))
 
         # On all servers, do a standard check deploy.
-        system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.join(',')} -P host_monkeypatch:#{@domain_name} -- sudo hdeploy_node check_deploy")
+        system("#{_fab} -f $(hdeploy_filepath fabfile.py) -H #{h.keys.join(',')} -P host_monkeypatch:#{@domain_name} -- sudo hdeploy_node check_deploy")
 
         # And on a single server, run the single hook.
         hookparams = { app: @app, env: @env, artifact: build_tag, servers:h.keys.join(','), user: ENV['USER'] }.collect {|k,v| "#{k}:#{v}" }.join(" ")
-        system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.sample} -P host_monkeypatch:#{@domain_name} -- 'echo #{hookparams} | sudo hdeploy_node post_distribute_run_once'")
+        system("#{_fab} -f $(hdeploy_filepath fabfile.py) -H #{h.keys.sample} -P host_monkeypatch:#{@domain_name} -- 'echo #{hookparams} | sudo hdeploy_node post_distribute_run_once'")
       end
     end
 
@@ -491,11 +512,11 @@ module HDeploy
       end
 
       # On all servers, do a standard symlink
-      system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.join(',')} -P host_monkeypatch:#{@domain_name} -- 'echo app:#{@app} env:#{@env} | sudo hdeploy_node symlink'")
+      system("#{_fab} -f $(hdeploy_filepath fabfile.py) -H #{h.keys.join(',')} -P host_monkeypatch:#{@domain_name} -- 'echo app:#{@app} env:#{@env} | sudo hdeploy_node symlink'")
 
       # And on a single server, run the single hook.
       hookparams = { app: @app, env: @env, artifact: target, servers:h.keys.join(','), user: ENV['USER'] }.collect {|k,v| "#{k}:#{v}" }.join(" ")
-      system("fab -f $(hdeploy_filepath fabfile.py) -H #{h.keys.sample} -P host_monkeypatch:#{@domain_name} -- 'echo #{hookparams} | sudo hdeploy_node post_symlink_run_once'")
+      system("#{_fab} -f $(hdeploy_filepath fabfile.py) -H #{h.keys.sample} -P host_monkeypatch:#{@domain_name} -- 'echo #{hookparams} | sudo hdeploy_node post_symlink_run_once'")
     end
   end
 end

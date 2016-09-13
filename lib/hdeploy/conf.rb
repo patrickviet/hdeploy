@@ -1,9 +1,14 @@
 require 'json'
+require 'deep_merge'
+require 'deep_clone'
 
 module HDeploy
   class Conf
 
     @@instance = nil
+    @@default_values = []
+
+    attr_reader :file
 
     def initialize(file)
       @file = file
@@ -34,5 +39,17 @@ module HDeploy
       @conf[k] 
     end
     
+    # -------------------------------------------------------------------------
+    def add_defaults(h)
+      # This is pretty crappy code in that it loads stuff twice etc. But that way no re-implementing a variation of deep_merge for default stuff...
+      @@default_values << h.__deep_clone__
+
+      rebuild_conf = {}
+      @@default_values.each do |defval|
+        rebuild_conf.deep_merge!(defval)
+      end
+
+      @conf = rebuild_conf.deep_merge!(@conf)
+    end
   end
 end

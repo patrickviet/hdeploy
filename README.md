@@ -89,41 +89,53 @@ Configuration documentation
 
 ```json
 {
-  "api": {
-    "http_user": "someuser",
-    "http_password": "somepassword",
-    "endpoint": "http://somefqdn:port/"
+  "api": { // used by every element - they all access the API
+    "http_user": "someuser", // required
+    "http_password": "somepassword", // required
+    "endpoint": "http://somefqdn:port/" // required
   },
-  "node": {
-    "keepalive_delay": 60,
-    "check_deploy_delay": 60
+  "node": { // just required by the node
+    "keepalive_delay": 60, // defaults to 60
+    "check_deploy_delay": 60, // default to 60
+    "max_run_duration": 3600, // default to 1 hr
+    "hostname":"somefqdn" // defaults to fqdn
   },
-  "build": {
+  "build": { // required on the build server. You don't even need a build server
     "nameofapp": {
-      "git": "git@github.com:organization/repo",
-      "subdir": "",
-      "prune": 5,
-      "repo_dir": "~/build/repos/nameofapp",
-
-      "build_dir": "~/build/build/nameofapp",
-      "artifacts_dir": "/home/artifacts"
+      "git": "git@github.com:organization/repo", // required
+      "subdir": "", // default value
+      "prune": 5, // default value
+      "repo_dir": "~/build/repos/nameofapp", // this will default to this
+      "build_dir": "~/build/build/nameofapp", // this will default to this too
+      "artifact_repo": "nameofrepo" // will default to 'default'
 
     }
   },
-  "deploy": {
-    "nameofapp": {
-      "relpath": "/var/www/nameofapp/releases",
-      "tgzpath": "/var/www/nameofapp/tarballs",
-      "symlink": "/var/www/nameofapp/current",
-      "user": "appuser",
-      "group": "appgroup"
+  "artifact_repo": { // just on the build server. you could actually build on jenkins, issue an API command and never use this
+    "nameofrepo": {
+      "type":"local", // required
+      "path":"/home/artifacts" // required for local
+      "url_pattern":"http://localhost:8502/%{filename}" // required for local
     }
   },
-  "cli": {
-    "fab": "/opt/hdeploy/embedded/bin/fab",
-    "default_app":"nameofapp",
-    "domain_name":"mydomain.com"
+  "deploy": { // required on node
+    "nameofapp:env": { // you need the environment. It's originally coupled with chef but actually you can do whatever you want
+      "symlink": "/var/www/nameofapp/current", // required
+      "relpath": "/var/www/nameofapp/releases", // will default to symlink/../releases
+      "tgzpath": "/var/www/nameofapp/tarballs", // will default to symlink/../tarballs
+      "user": "appuser", // will default to www-data (33)
+      "group": "appgroup" // will default to www-data (33)
+
+      "active": true // defaults to false. this allows to define all deploys in config but only activate them selectively
+    }
+  },
+  "cli": { 
+    "fab": "/opt/hdeploy/embedded/bin/fab", // will default to this
+    "default_app":"nameofapp", // if not set, the cli will scream if you don't specify an app
+    "domain_name":"mydomain.com" // will default to nothing. you'
   }
 }
 
 ```
+
+If you use the Chef recipe, and the LWRPs, you'll get a bonus syntax check for everything

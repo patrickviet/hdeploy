@@ -21,6 +21,8 @@ Gem::Specification.new do |s|
   s.add_runtime_dependency 'inifile',   '>= 2.0.2'  
   s.add_runtime_dependency 'cassandra-driver',   '>= 2.0.1'
   s.add_runtime_dependency 'eventmachine', '>= 1.0.7'
+  s.add_runtime_dependency 'deep_clone', '>= 0.0.1'
+  s.add_runtime_dependency 'deep_merge', '>= 1.1.1'
 
   s.add_development_dependency 'pry'
 end

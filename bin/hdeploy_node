@@ -1,7 +1,11 @@
 #!/usr/bin/env ruby
 
+# FIXME: this allows to load without bundle or installing the gem
+$LOAD_PATH.unshift File.expand_path(File.join(__FILE__,'../../lib'))
+
 require 'hdeploy'
 
+# Note: this means this can't really be done by executing
 node = HDeploy::Node.new
 
 
@@ -18,7 +22,7 @@ else
 
     node.symlink(params)
 
-  elsif %w(symlink post_distribute_run_once post_symlink_run_once).include? ARGV.first
+  elsif %w[symlink post_distribute_run_once post_symlink_run_once].include? ARGV.first
 
     # Decode the next ARGV stuff. This encoding k:v is the simplest I found.
     params = {}

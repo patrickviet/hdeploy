@@ -3,12 +3,56 @@ require 'json'
 require 'fileutils'
 require 'pathname'
 require 'inifile'
-
+require 'pry'
 module HDeploy
   class Node
 
     def initialize
-      @conf = HDeploy::Conf.instance
+      @conf = HDeploy::Conf.instance('./hdeploy.conf.json')
+      @conf.add_defaults({
+        'node' => {
+          'keepalive_delay' => 60,
+          'check_deploy_delay' => 60,
+          'max_run_duration' => 3600,
+          'hostname' => `/bin/hostname`.chomp,
+        }
+      })
+
+      # Check for needed configuration parameters
+      # API
+      api_params = %w[http_user http_password endpoint]
+      raise "#{@conf.file}: you need 'api' section for hdeploy node (#{api_params.join(', ')})" unless @conf['api']
+      api_params.each do |p|
+        raise "#{@conf.file}: you need param for hdeploy node: api/#{p}" unless @conf['api'][p]
+      end
+
+      # Deploy
+      raise "#{@conf.file}: you need 'deploy' section for hdeploy node" unless @conf['deploy']
+      @conf['deploy'].keys.each do |k|
+        raise "#{@conf.file}: deploy key must be in the format app:env - found #{k}" unless k =~ /^[a-z0-9\-\_]+:[a-z0-9\-\_]+$/
+      end
+
+      default_user = Process.uid == 0 ? 'www-data' : Process.uid
+      default_group = Process.gid == 0 ? 'www-data' : Process.gid
+
+      @conf['deploy'].each do |k,c|
+        raise "#{@conf.file}: deploy section '#{k}': missing symlink param" unless c['symlink']
+        c['symlink'] = File.expand_path(c['symlink'])
+
+        # FIXME: throw exception if user/group are root and/or don't exist
+        {
+          'relpath' => File.expand_path('../releases', c['symlink']),
+          'tgzpath' => File.expand_path('../tarballs', c['symlink']),
+          'user' => default_user,
+          'group' => default_group,
+        }.each do |k2,v|
+          c[k2] ||= v
+        end
+
+        # It's not a mistake to check for uid in the gid section: only root can change gid.
+        raise "You must run node as uid root if you want a different user for deploy #{k}" if Process.uid != 0 and c['user'] != Process.uid
+        raise "You must run node as gid root if you want a different group for deploy #{k}" if Process.uid != 0 and c['group'] != Process.gid
+      end
     end
 
     # -------------------------------------------------------------------------
@@ -16,10 +60,14 @@ module HDeploy
       # Performance: require here so that launching other stuff doesn't load the library
       require 'eventmachine'
 
+      # FIXME: This is super dirty...
+      hdn = File.expand_path '../../../bin/hdeploy_node',__FILE__
+
       EM.run do
-        repeat_action("#{@home}/bin/hdeploy_node keepalive",   @conf.node['keepalive_delay'].to_i,0)
-        repeat_action("#{@home}/bin/hdeploy_node check_deploy",@conf.node['check_deploy_delay'].to_i,100)
-        EM.add_timer(@conf.node['max_run_duration'].to_i) do
+        # FIXME: change the absolute path to something found from stack trace or other.
+        repeat_action("#{hdn} keepalive",   @conf['node']['keepalive_delay'].to_i,0)
+        repeat_action("#{hdn} check_deploy",@conf['node']['check_deploy_delay'].to_i,100)
+        EM.add_timer(@conf['node']['max_run_duration'].to_i) do
           puts "has run long enough"
           EM.stop
         end
@@ -36,16 +84,16 @@ module HDeploy
 
     # -------------------------------------------------------------------------
     def keepalive
-      hostname = @conf.node['hostname']
+      hostname = @conf['node']['hostname']
       c = Curl::Easy.new(@conf['api']['endpoint'] + '/srv/keepalive/' + hostname)
       c.http_auth_types = :basic
       c.username = @conf['api']['http_user']
       c.password = @conf['api']['http_password']
-      c.put((@conf.node['keepalive_delay'].to_i * 2).to_s)
+      c.put((@conf['node']['keepalive_delay'].to_i * 2).to_s)
     end
 
     def put_state
-      hostname = @conf.node['hostname']
+      hostname = @conf['node']['hostname']
 
       c = Curl::Easy.new(@conf['api']['endpoint'] + '/distribute_state/' + hostname)
       c.http_auth_types = :basic
@@ -100,6 +148,7 @@ module HDeploy
           warn "file #{file} does not have permissions 100755"
         end
       end
+      return nil
     end
 
     def check_deploy
@@ -112,7 +161,7 @@ module HDeploy
 
       # Now this is the big stuff
       @conf['deploy'].each do |section,conf|
-        app,env = section.split(':')
+        app,env = section.split(':') #it's already checked for syntax higher in the code
 
         # Here we get the info.
         # FIXME: double check that config is ok
@@ -169,9 +218,15 @@ module HDeploy
             FileUtils.mkdir_p destdir
             FileUtils.chown user, group, destdir
             Dir.chdir destdir
-            chpst = find_executable('chpst')
+
+            chpst = ''
+            if Process.uid == 0
+              chpst = find_executable('chpst') or raise "unable to find chpst binary"
+              chpst += " -u #{user}:#{group} "
+            end
+
             tar = find_executable('tar')
-            system("#{chpst} -u #{user}:#{group} #{tar} xzf #{tgzfile}") or raise "unable to extract #{tgzfile} as #{user}:#{group}"
+            system("#{chpst}#{tar} xzf #{tgzfile}") or raise "unable to extract #{tgzfile} as #{user}:#{group}"
             File.chmod 0755, destdir
 
             # Post distribute hook
@@ -235,13 +290,20 @@ module HDeploy
 
       # OK let's run the hook
       Dir.chdir destdir
-      system("chpst -u #{user}:#{group} #{hfile} '#{JSON.generate(params)}'")
+
+      chpst = ''
+      if Process.uid == 0
+        chpst = find_executable('chpst') or raise "unable to find chpst binary"
+        chpst += " -u #{user}:#{group} "
+      end
+
+      system("#{chpst}#{hfile} '#{JSON.generate(params)}'")
       if $?.success?
         puts "Successfully run #{hook} hook / #{hfile}"
         Dir.chdir oldpwd
       else
         Dir.chdir oldpwd
-        raise "Error while running file #{hfile} hook #{hook} : #{$?} - (DEBUG Full command - pwd: #{destdir}): chpst -u #{user}:#{group} #{hfile} '#{JSON.generate(params)}'"
+        raise "Error while running file #{hfile} hook #{hook} : #{$?} - (DEBUG: (pwd: #{destdir}): #{chpst}#{hfile} '#{JSON.generate(params)}'"
       end
     end
 
@@ -275,7 +337,7 @@ module HDeploy
         else
           # atomic symlink override
           puts "setting symlink for app #{app} to #{target_relative_path}"
-          File.symlink(target_relative_path,link + '.tmp')
+          File.symlink(target_relative_path,link + '.tmp') #FIXME: should this belong to root?
           File.rename(link + '.tmp', link)
           put_state
         end

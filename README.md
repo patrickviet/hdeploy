@@ -87,7 +87,7 @@ If something didn't fully roll out for whatever reason (say, network failure) yo
 Configuration documentation
 ---------------------------
 
-```json
+```javascript
 {
   "api": { // used by every element - they all access the API
     "http_user": "someuser", // required

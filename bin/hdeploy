@@ -5,3 +5,4 @@ require 'hdeploy'
 cli = HDeploy::CLI.new
 cli.run!
 
+nicoru
